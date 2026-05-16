@@ -1,6 +1,11 @@
 # config.py — إعدادات البوت
 
-BOT_TOKEN = "8992422291:AAGqSKqVlAj2NZsKGLPETvhgkFzwoibebII"
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8992422291:AAGqSKqVlAj2NZsKGLPETvhgkFzwoibebII")
 ADMIN_ID = 8601067589
 CHANNEL_ID = "@RaqeebIQ"
 
