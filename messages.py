@@ -109,11 +109,12 @@ def search_stock_msg():
 
 # ─── نتيجة البحث ───
 def stock_result_msg(data):
-    arrow = "▲" if data.get("change","").startswith("-") is False else "▼"
+    change_pct = data.get("change_pct", "0%")
+    arrow = "▼" if "-" in str(change_pct) else "▲"
     text = (
         f"🏢 {data.get('name', data['symbol'])} | {data['symbol']}\n\n"
         f"💰 السعر الحالي: {data.get('price','—')} دينار\n"
-        f"📈 التغيير: {arrow} {data.get('change_pct','—')}\n"
+        f"📈 التغيير: {arrow} {change_pct}\n"
         f"📊 أعلى سعر اليوم: {data.get('high','—')}\n"
         f"📊 أدنى سعر اليوم: {data.get('low','—')}\n"
         f"🔄 حجم التداول: {data.get('volume','—')}"
@@ -149,7 +150,6 @@ def alerts_msg(alerts):
 
 # ─── الاشتراك ───
 def subscription_msg(user):
-    from datetime import datetime
     now = datetime.now()
     sub_end = user.get("sub_end")
     trial_end = user.get("trial_end")
@@ -249,7 +249,7 @@ def monthly_report_msg(data, stocks):
     )
     return text
 
-# ─── تنبيه انتهاء الاشتراك (قبل يوم) ───
+# ─── تنبيه انتهاء الاشتراك ───
 def expiry_warning_msg(end_date):
     text = (
         f"⚠️ رقيب | تنبيه\n\n"
