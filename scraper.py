@@ -1,11 +1,11 @@
-# scraper.py — سحب البيانات من Investing.com بتجاوز الحجب
-
+# scraper.py — سحب بيانات بورصة العراق وتجنب الحظر والـ 404
 import cloudscraper
 from bs4 import BeautifulSoup
 import re
 import time
 import random
 
+# إنشاء السكرابر متخفي بصيغة متصفح كروم حقيقي
 scraper = cloudscraper.create_scraper(
     browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
 )
@@ -14,38 +14,47 @@ ISX_BASE = "http://isx-iq.net/isxportal/portal"
 INVESTING_BASE = "https://www.investing.com"
 
 def smart_sleep():
+    """تأخير زمني عشوائي لتجنب كشف البوت من جدران الحماية"""
     time.sleep(random.uniform(1.5, 3.5))
 
-def safe_get(url, retries=3):
+def safe_get(url, headers=None, retries=3):
+    """إرسال الطلب بأمان مع محاولات إعادة الاتصال عند الفشل"""
+    if headers is None:
+        headers = {
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.google.com/"
+        }
+    
     for attempt in range(retries):
         try:
             smart_sleep()
-            r = scraper.get(url, timeout=20)
+            r = scraper.get(url, headers=headers, timeout=20)
             if r.status_code == 200:
                 return r
-            print(f"[Scraper] ⚠️ {r.status_code} - المحاولة {attempt+1}/{retries}")
-            time.sleep(random.uniform(5, 10))
+            print(f"[Scraper] ⚠️ كود الاستجابة {r.status_code} - المحاولة {attempt+1}/{retries}")
+            time.sleep(random.uniform(4, 8))
         except Exception as e:
-            print(f"[Scraper] ❌ خطأ: {e} - المحاولة {attempt+1}/{retries}")
-            time.sleep(random.uniform(3, 6))
+            print(f"[Scraper] ❌ خطأ اتصال: {e} - المحاولة {attempt+1}/{retries}")
+            time.sleep(random.uniform(3, 5))
     return None
 
-# ── قائمة الأسهم العراقية الرئيسية ──
+# ── قائمة الأسهم العراقية الرئيسية (محدثة ومطابقة لروابط Investing العالمية) ──
 IRAQI_STOCKS = {
-    "BBOB": {"name": "مصرف بغداد", "investing_id": "iq/baghdad-bank"},
-    "TASC": {"name": "شركة الاتصالات العراقية", "investing_id": "iq/iraqi-telecommunications"},
-    "BCOI": {"name": "مصرف الخليج التجاري", "investing_id": "iq/commercial-bank-of-iraq"},
-    "BUND": {"name": "مصرف الاتحاد", "investing_id": "iq/union-bank-of-iraq"},
-    "BNOI": {"name": "مصرف الشمال", "investing_id": "iq/north-bank"},
-    "IBSD": {"name": "مصرف الاستثمار العراقي", "investing_id": "iq/investment-bank-of-iraq"},
-    "HLIS": {"name": "شركة الهلال للصناعة", "investing_id": "iq/hilal-industries"},
-    "TELE": {"name": "شركة آسيا سيل للاتصالات", "investing_id": "iq/asiacell"},
-    "AAHP": {"name": "شركة آسيا للفنادق", "investing_id": "iq/asia-hotel"},
-    "IICL": {"name": "شركة التأمين العراقية", "investing_id": "iq/iraqi-insurance"},
+    "BBOB": {"name": "مصرف بغداد", "investing_id": "bank-of-baghdad"},
+    "TELE": {"name": "آسيا سيل للاتصالات", "investing_id": "asiacell"},
+    "TASC": {"name": "آسيا سيل للاتصالات", "investing_id": "asiacell"},  # لدعم الرمزين
+    "BNOI": {"name": "المصرف الأهلي العراقي", "investing_id": "national-bank-of-iraq"},
+    "BCOI": {"name": "مصرف الخليج التجاري", "investing_id": "commercial-bank-of-iraq"},
+    "BUND": {"name": "مصرف الاتحاد العراقي", "investing_id": "union-bank-of-iraq"},
+    "HBAY": {"name": "مصرف المنصور للاستثمار", "investing_id": "al-mansour-bank"},
+    "BIME": {"name": "مصرف الشرق الأوسط العراقي", "investing_id": "iraq-middle-east-investment-bank"},
+    "HLIS": {"name": "شركة الهلال للصناعة", "investing_id": "hilal-industries"},
+    "AAHP": {"name": "شركة آسيا للفنادق", "investing_id": "asia-hotel"},
+    "IICL": {"name": "شركة التأمين العراقية", "investing_id": "iraqi-insurance"},
 }
 
 def get_market_summary():
-    """يجلب ملخص السوق من ISX أو يرجع بيانات افتراضية"""
+    """يجلب ملخص البورصة العام من ISX أو يرجع بيانات احتياطية"""
     r = safe_get(f"{ISX_BASE}/homePage.html")
     if r:
         try:
@@ -66,22 +75,15 @@ def get_market_summary():
         except Exception as e:
             print(f"[Scraper] market_summary error: {e}")
 
-    # بيانات احتياطية لو الموقع محجوب
     return {
-        "index": "—",
-        "change_pct": "—",
-        "value": "—",
-        "trades": "—",
-        "up": "—",
-        "down": "—",
-        "flat": "—",
+        "index": "—", "change_pct": "—", "value": "—", "trades": "—", "up": "—", "down": "—", "flat": "—",
     }
 
 def get_stock_info(symbol):
-    """يبحث عن سهم - يجرب ISX أولاً ثم Investing"""
+    """يبحث عن السهم المطلوب: يجرب الموقع الرسمي أولاً، وإن فشل ينتقل لـ Investing"""
     symbol = symbol.upper().strip()
 
-    # جرب ISX أولاً
+    # 1. المحاولة الأولى من موقع سوق العراق للأوراق المالية المباشر
     r = safe_get(f"{ISX_BASE}/companyProfileByInvestor.html?companyCode={symbol}")
     if r and len(r.text) > 500:
         try:
@@ -99,23 +101,31 @@ def get_stock_info(symbol):
             if len(data) > 2:
                 return data
         except Exception as e:
-            print(f"[Scraper] ISX stock error: {e}")
+            print(f"[Scraper] ISX stock error for {symbol}: {e}")
 
-    # جرب Investing.com
+    # 2. المحاولة الثانية (الخطة البديلة المستقرة) عبر موقع Investing.com
     stock_info = IRAQI_STOCKS.get(symbol)
     if stock_info:
         url = f"{INVESTING_BASE}/equities/{stock_info['investing_id']}"
-        r2 = safe_get(url)
+        
+        # فرض لغة متصفح عالمية لمنع تحويل الموقع للنسخة العربية المعطلة (تجنب 404)
+        headers = {
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.google.com/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        
+        r2 = safe_get(url, headers=headers)
         if r2:
             try:
                 soup = BeautifulSoup(r2.text, "html.parser")
 
-                # السعر
+                # جلب السعر الفوري بناءً على المعرفات المستقرة للموقع
                 price_el = soup.find("span", {"data-test": "instrument-price-last"})
                 if not price_el:
-                    price_el = soup.select_one('[class*="last-price"]') or soup.select_one('[class*="price"]')
+                    price_el = soup.select_one('[data-test="instrument-price-last"]') or soup.select_one('[class*="last-price"]')
 
-                # التغيير
+                # جلب نسبة التغير اليومي
                 change_el = soup.find("span", {"data-test": "instrument-price-change-percent"})
 
                 price = price_el.get_text(strip=True) if price_el else "—"
@@ -131,9 +141,9 @@ def get_stock_info(symbol):
                     "volume": "—",
                 }
             except Exception as e:
-                print(f"[Scraper] Investing stock error: {e}")
+                print(f"[Scraper] Investing parse error for {symbol}: {e}")
 
-        # لو Investing ما اشتغل، ارجع بيانات أساسية
+        # إذا تعطل كلا الموقعين، يرجع البوت اسم الشركة من القاموس مع رسالة تنبيه ذكية بدلاً من الانهيار
         return {
             "symbol": symbol,
             "name": stock_info["name"],
@@ -144,10 +154,10 @@ def get_stock_info(symbol):
             "volume": "—",
         }
 
-    return None  # سهم غير موجود بالقاموس
+    return None  # السهم غير معرف كلياً في قاموس البوت
 
 def get_top_stocks():
-    """يجلب أبرز الأسهم"""
+    """يجلب أبرز الأسهم الرابحة والخاسرة في الجلسة"""
     r = safe_get(f"{ISX_BASE}/homePage.html")
     if r:
         try:
@@ -173,11 +183,10 @@ def get_top_stocks():
         except Exception as e:
             print(f"[Scraper] top_stocks error: {e}")
 
-    # بيانات احتياطية
     return {"up": [], "down": []}
 
 def get_latest_news():
-    """يجلب آخر الأخبار"""
+    """يجلب شريط آخر الأخبار والتعاميم من البورصة"""
     r = safe_get(f"{ISX_BASE}/storyList.html?activeTab=0")
     if not r:
         return []
@@ -203,7 +212,7 @@ def get_latest_news():
         return []
 
 def get_stock_price_for_alert(symbol):
-    """يجلب السعر الحالي فقط لفحص التنبيهات"""
+    """جلب السعر كرقم فلوت (Float) مخصص لنظام التنبيهات والأسعار المحددة"""
     data = get_stock_info(symbol)
     if data and data.get("price") and data["price"] not in ["—", "⏳ البيانات غير متاحة حالياً"]:
         try:
