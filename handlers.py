@@ -27,6 +27,15 @@ async def start_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text, kb = welcome_msg()
     await update.message.reply_photo(photo=IMAGES["welcome"], caption=text, reply_markup=kb)
 
+# ─── إرسال رسالة جديدة مع صورة ───
+async def send_new(query, image_key, text, kb):
+    """يرسل رسالة جديدة دائماً"""
+    await query.message.reply_photo(
+        photo=IMAGES[image_key],
+        caption=text,
+        reply_markup=kb
+    )
+
 # ─── معالج الأزرار ───
 async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -39,16 +48,21 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         joined = await check_channel(ctx.bot, user.id)
         if not joined:
             text, kb = join_channel_msg()
-            await query.edit_message_caption(caption=text, reply_markup=kb)
+            await query.message.reply_photo(
+                photo=IMAGES["welcome"],
+                caption=text,
+                reply_markup=kb
+            )
             return
         active = await is_user_active(user.id)
         if not active:
-            await query.edit_message_caption(caption=expiry_msg())
+            await query.message.reply_text(expiry_msg())
             return
         market = get_market_summary()
         text, kb = main_menu_msg(market)
-        await query.edit_message_media(
-            media=InputMediaPhoto(media=IMAGES["daily"], caption=text),
+        await query.message.reply_photo(
+            photo=IMAGES["daily"],
+            caption=text,
             reply_markup=kb
         )
 
@@ -56,12 +70,13 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif data == "back_main":
         active = await is_user_active(user.id)
         if not active:
-            await query.edit_message_caption(caption=expiry_msg())
+            await query.message.reply_text(expiry_msg())
             return
         market = get_market_summary()
         text, kb = main_menu_msg(market)
-        await query.edit_message_media(
-            media=InputMediaPhoto(media=IMAGES["daily"], caption=text),
+        await query.message.reply_photo(
+            photo=IMAGES["daily"],
+            caption=text,
             reply_markup=kb
         )
 
@@ -69,39 +84,50 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif data == "top_stocks":
         stocks = get_top_stocks()
         text, kb = top_stocks_msg(stocks)
-        await query.edit_message_media(
-            media=InputMediaPhoto(media=IMAGES["daily"], caption=text),
+        await query.message.reply_photo(
+            photo=IMAGES["daily"],
+            caption=text,
             reply_markup=kb
         )
 
     # ── بحث عن سهم ──
     elif data == "search_stock":
+        ctx.user_data["waiting_search"] = True
         text, kb = search_stock_msg()
-        await query.edit_message_media(
-            media=InputMediaPhoto(media=IMAGES["search"], caption=text),
+        await query.message.reply_photo(
+            photo=IMAGES["search"],
+            caption=text,
             reply_markup=kb
         )
-        ctx.user_data["waiting_search"] = True
 
     # ── تنبيهاتي ──
     elif data == "my_alerts":
         alerts = await get_user_alerts(user.id)
         text, kb = alerts_msg(alerts)
-        await query.edit_message_caption(caption=text, reply_markup=kb)
+        await query.message.reply_photo(
+            photo=IMAGES["daily"],
+            caption=text,
+            reply_markup=kb
+        )
 
     # ── اشتراكي ──
     elif data == "my_sub":
         u = await get_user(user.id)
         text, kb = subscription_msg(u)
-        await query.edit_message_caption(caption=text, reply_markup=kb)
+        await query.message.reply_photo(
+            photo=IMAGES["payment"],
+            caption=text,
+            reply_markup=kb
+        )
 
     # ── اختيار خطة ──
     elif data in ["sub_monthly", "sub_yearly"]:
         plan = "monthly" if data == "sub_monthly" else "yearly"
         ctx.user_data["pending_plan"] = plan
         text, kb = payment_msg(plan)
-        await query.edit_message_media(
-            media=InputMediaPhoto(media=IMAGES["payment"], caption=text),
+        await query.message.reply_photo(
+            photo=IMAGES["payment"],
+            caption=text,
             reply_markup=kb
         )
 
@@ -113,26 +139,21 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         action = parts[1]
         target_id = int(parts[2])
 
-        if action == "monthly":
-            ctx.user_data[f"confirm_{target_id}"] = "monthly"
+        if action in ["monthly", "yearly"]:
+            plan_ar = "شهري" if action == "monthly" else "سنوي"
             kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ تأكيد", callback_data=f"confirm_monthly_{target_id}"),
+                InlineKeyboardButton("✅ تأكيد", callback_data=f"confirm_{action}_{target_id}"),
                 InlineKeyboardButton("🔙 تراجع", callback_data=f"cancel_{target_id}"),
             ]])
-            await query.edit_message_reply_markup(reply_markup=kb)
-
-        elif action == "yearly":
-            ctx.user_data[f"confirm_{target_id}"] = "yearly"
-            kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ تأكيد", callback_data=f"confirm_yearly_{target_id}"),
-                InlineKeyboardButton("🔙 تراجع", callback_data=f"cancel_{target_id}"),
-            ]])
-            await query.edit_message_reply_markup(reply_markup=kb)
+            await query.message.reply_text(
+                f"⚠️ تأكيد التفعيل\n\nالخطة: {plan_ar}\nالمستخدم: {target_id}",
+                reply_markup=kb
+            )
 
         elif action == "reject":
             await ctx.bot.send_message(target_id,
                 "❌ عذراً، لم يتم قبول طلبك\nيرجى التواصل مع الدعم أو إعادة المحاولة.")
-            await query.edit_message_text("❌ تم رفض الطلب")
+            await query.message.reply_text("❌ تم رفض الطلب")
 
     elif data.startswith("confirm_"):
         if user.id != ADMIN_ID:
@@ -143,14 +164,11 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         sub_end = await activate_subscription(target_id, plan)
         end_str = sub_end.strftime("%d/%m/%Y")
         plan_ar = "شهري" if plan == "monthly" else "سنوي"
-        # زر إرسال الإشعار
         kb = InlineKeyboardMarkup([[
             InlineKeyboardButton("📨 إرسال إشعار للمستخدم", callback_data=f"notify_{target_id}_{plan}_{end_str}")
         ]])
-        await query.edit_message_text(
-            f"✅ تم التفعيل بنجاح\n\n"
-            f"👤 ID: {target_id}\n"
-            f"📅 {plan_ar} | حتى {end_str}",
+        await query.message.reply_text(
+            f"✅ تم التفعيل بنجاح\n\n👤 ID: {target_id}\n📅 {plan_ar} | حتى {end_str}",
             reply_markup=kb
         )
 
@@ -163,7 +181,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ],
             [InlineKeyboardButton("❌ رفض", callback_data=f"admin_reject_{target_id}")]
         ])
-        await query.edit_message_reply_markup(reply_markup=kb)
+        await query.message.reply_text("اختر الخطة:", reply_markup=kb)
 
     elif data.startswith("notify_"):
         if user.id != ADMIN_ID:
@@ -182,7 +200,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"استمتع بمتابعة سوق الأسهم العراقية 📊"
             + footer()
         )
-        await query.edit_message_text(query.message.text + "\n\n📨 تم إرسال الإشعار ✅")
+        await query.message.reply_text("📨 تم إرسال الإشعار ✅")
 
 # ─── معالج الرسائل النصية ───
 async def message_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -195,15 +213,19 @@ async def message_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     active = await is_user_active(user.id)
 
     # ── البحث عن سهم ──
-    if ctx.user_data.get("waiting_search") and active:
+    if ctx.user_data.get("waiting_search"):
         ctx.user_data["waiting_search"] = False
         symbol = text.upper().strip()
         stock = get_stock_info(symbol)
-        if stock:
+        if stock and len(stock) > 2:
             msg, kb = stock_result_msg(stock)
         else:
             msg, kb = stock_not_found_msg(symbol)
-        await update.message.reply_photo(photo=IMAGES["search"], caption=msg, reply_markup=kb)
+        await update.message.reply_photo(
+            photo=IMAGES["search"],
+            caption=msg,
+            reply_markup=kb
+        )
         return
 
     # ── أمر التنبيه /تنبيه BBOB 5 ──
@@ -213,9 +235,7 @@ async def message_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             symbol = parts[1].upper()
             try:
                 value = float(parts[2])
-                alert_type = "up"
-                if len(parts) >= 4 and parts[3] == "انخفاض":
-                    alert_type = "down"
+                alert_type = "down" if len(parts) >= 4 and parts[3] == "انخفاض" else "up"
                 await add_alert(user.id, symbol, alert_type, value)
                 await update.message.reply_text(
                     f"✅ تم إضافة التنبيه\n{symbol} | {'📈 ارتفاع' if alert_type=='up' else '📉 انخفاض'} {value}%"
@@ -232,35 +252,6 @@ async def message_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("✅ تم حذف التنبيه")
         except:
             await update.message.reply_text("❌ خطأ في حذف التنبيه")
-        return
-
-    # ── إيصال دفع (صورة) ──
-    if update.message.photo and active is False:
-        plan = ctx.user_data.get("pending_plan", "monthly")
-        plan_ar = "شهري" if plan == "monthly" else "سنوي"
-        photo_id = update.message.photo[-1].file_id
-        kb = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ تفعيل شهري", callback_data=f"admin_monthly_{user.id}"),
-                InlineKeyboardButton("✅ تفعيل سنوي",  callback_data=f"admin_yearly_{user.id}"),
-            ],
-            [InlineKeyboardButton("❌ رفض", callback_data=f"admin_reject_{user.id}")]
-        ])
-        await ctx.bot.send_photo(
-            ADMIN_ID,
-            photo=photo_id,
-            caption=(
-                f"📩 طلب اشتراك جديد\n\n"
-                f"👤 الاسم: {user.full_name}\n"
-                f"🆔 ID: {user.id}\n"
-                f"📅 الخطة المختارة: {plan_ar}\n"
-                f"🖼️ الإيصال أعلاه"
-            ),
-            reply_markup=kb
-        )
-        await update.message.reply_text(
-            "✅ تم استلام الإيصال\nسيتم مراجعته وتفعيل اشتراكك قريباً 🙏"
-        )
         return
 
     # ── أوامر الأدمن ──
