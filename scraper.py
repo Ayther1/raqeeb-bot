@@ -1,4 +1,5 @@
-# scraper.py — سحب البيانات من Investing.com بتجاوز الحجب
+cat > /mnt/user-data/outputs/scraper.py << 'ENDOFFILE'
+# scraper.py — سحب البيانات من البورصة العراقية
 
 import cloudscraper
 from bs4 import BeautifulSoup
@@ -11,41 +12,136 @@ scraper = cloudscraper.create_scraper(
 )
 
 ISX_BASE = "http://isx-iq.net/isxportal/portal"
-INVESTING_BASE = "https://www.investing.com"
 
 def smart_sleep():
-    time.sleep(random.uniform(1.5, 3.5))
+    time.sleep(random.uniform(1.0, 2.0))
 
 def safe_get(url, retries=3):
     for attempt in range(retries):
         try:
             smart_sleep()
-            r = scraper.get(url, timeout=20)
+            r = scraper.get(url, timeout=15)
             if r.status_code == 200:
                 return r
-            print(f"[Scraper] ⚠️ {r.status_code} - المحاولة {attempt+1}/{retries}")
-            time.sleep(random.uniform(5, 10))
-        except Exception as e:
-            print(f"[Scraper] ❌ خطأ: {e} - المحاولة {attempt+1}/{retries}")
+            print(f"[Scraper] {r.status_code} - المحاولة {attempt+1}/{retries}")
             time.sleep(random.uniform(3, 6))
+        except Exception as e:
+            print(f"[Scraper] خطأ: {e} - المحاولة {attempt+1}/{retries}")
+            time.sleep(random.uniform(2, 4))
     return None
 
-# ── قائمة الأسهم العراقية الرئيسية ──
 IRAQI_STOCKS = {
-    "BBOB": {"name": "مصرف بغداد", "investing_id": "iq/baghdad-bank"},
-    "TASC": {"name": "شركة الاتصالات العراقية", "investing_id": "iq/iraqi-telecommunications"},
-    "BCOI": {"name": "مصرف الخليج التجاري", "investing_id": "iq/commercial-bank-of-iraq"},
-    "BUND": {"name": "مصرف الاتحاد", "investing_id": "iq/union-bank-of-iraq"},
-    "BNOI": {"name": "مصرف الشمال", "investing_id": "iq/north-bank"},
-    "IBSD": {"name": "مصرف الاستثمار العراقي", "investing_id": "iq/investment-bank-of-iraq"},
-    "HLIS": {"name": "شركة الهلال للصناعة", "investing_id": "iq/hilal-industries"},
-    "TELE": {"name": "شركة آسيا سيل للاتصالات", "investing_id": "iq/asiacell"},
-    "AAHP": {"name": "شركة آسيا للفنادق", "investing_id": "iq/asia-hotel"},
-    "IICL": {"name": "شركة التأمين العراقية", "investing_id": "iq/iraqi-insurance"},
+    "BBOB": {"name": "مصرف بغداد", "sector": "مصارف"},
+    "BCOI": {"name": "مصرف الخليج التجاري", "sector": "مصارف"},
+    "BDSI": {"name": "مصرف بغداد للاستثمار", "sector": "مصارف"},
+    "BGUC": {"name": "مصرف الخليج العراقي", "sector": "مصارف"},
+    "BIAP": {"name": "مصرف بيروت عمان", "sector": "مصارف"},
+    "BIKE": {"name": "مصرف كردستان الإسلامي", "sector": "مصارف"},
+    "BIME": {"name": "مصرف الاستثمار والتنمية", "sector": "مصارف"},
+    "BISR": {"name": "المصرف العراقي الإسلامي", "sector": "مصارف"},
+    "BKUI": {"name": "مصرف كوردستان المتحد", "sector": "مصارف"},
+    "BLAD": {"name": "مصرف بلاد الرافدين", "sector": "مصارف"},
+    "BNOI": {"name": "مصرف الشمال", "sector": "مصارف"},
+    "BSUC": {"name": "مصرف الجنوب التجاري", "sector": "مصارف"},
+    "BUND": {"name": "مصرف الاتحاد", "sector": "مصارف"},
+    "BWOI": {"name": "مصرف الوركاء للاستثمار", "sector": "مصارف"},
+    "BZII": {"name": "مصرف الزوراء", "sector": "مصارف"},
+    "CIFI": {"name": "مصرف كيمان الإسلامي", "sector": "مصارف"},
+    "CSIB": {"name": "المصرف الصناعي", "sector": "مصارف"},
+    "DIJL": {"name": "مصرف دجلة والفرات", "sector": "مصارف"},
+    "EBDI": {"name": "بنك الشرق الأوسط", "sector": "مصارف"},
+    "FABI": {"name": "مصرف الأول للاستثمار", "sector": "مصارف"},
+    "FIBK": {"name": "المصرف العراقي الأول", "sector": "مصارف"},
+    "IBSD": {"name": "مصرف الاستثمار العراقي", "sector": "مصارف"},
+    "IICB": {"name": "مصرف الائتمان العراقي", "sector": "مصارف"},
+    "IMAM": {"name": "مصرف الإمام علي", "sector": "مصارف"},
+    "INBU": {"name": "مصرف الاستثمار الوطني", "sector": "مصارف"},
+    "JIBI": {"name": "مصرف الجمهورية", "sector": "مصارف"},
+    "KFHO": {"name": "مصرف الكوفة الإسلامي", "sector": "مصارف"},
+    "LBIS": {"name": "مصرف لبنان والمهجر", "sector": "مصارف"},
+    "MBIS": {"name": "مصرف بابل", "sector": "مصارف"},
+    "MDIG": {"name": "مصرف الشرق الأوسط العراقي", "sector": "مصارف"},
+    "MEBI": {"name": "مصرف الشرق الأوسط للاستثمار", "sector": "مصارف"},
+    "MIBZ": {"name": "مصرف الميزان الإسلامي", "sector": "مصارف"},
+    "MSBI": {"name": "مصرف المصرف", "sector": "مصارف"},
+    "NABI": {"name": "المصرف الوطني للاستثمار", "sector": "مصارف"},
+    "NIBD": {"name": "مصرف نينوى", "sector": "مصارف"},
+    "NIBF": {"name": "مصرف نور الإسلامي", "sector": "مصارف"},
+    "NOOR": {"name": "مصرف نور", "sector": "مصارف"},
+    "NSIB": {"name": "المصرف الوطني الإسلامي", "sector": "مصارف"},
+    "OFBI": {"name": "مصرف الوفاء الإسلامي", "sector": "مصارف"},
+    "RIIN": {"name": "مصرف الرشيد الإسلامي", "sector": "مصارف"},
+    "SBIS": {"name": "مصرف الصفا الإسلامي", "sector": "مصارف"},
+    "SHBI": {"name": "مصرف الشهداء للاستثمار", "sector": "مصارف"},
+    "SIIB": {"name": "مصرف سومر الإسلامي", "sector": "مصارف"},
+    "SLBI": {"name": "مصرف السلام", "sector": "مصارف"},
+    "TAAN": {"name": "مصرف التعاون الإسلامي", "sector": "مصارف"},
+    "TAIB": {"name": "مصرف طيبة للاستثمار", "sector": "مصارف"},
+    "TTBI": {"name": "مصرف التجارة والتمويل", "sector": "مصارف"},
+    "UBAI": {"name": "مصرف الاتحاد للاستثمار", "sector": "مصارف"},
+    "UIBI": {"name": "مصرف الوحدة الإسلامي", "sector": "مصارف"},
+    "UNBI": {"name": "مصرف الائتمان الوطني", "sector": "مصارف"},
+    "WABI": {"name": "مصرف واسط", "sector": "مصارف"},
+    "WARK": {"name": "مصرف الوركاء", "sector": "مصارف"},
+    "WIIB": {"name": "مصرف الوسيط الإسلامي", "sector": "مصارف"},
+    "TASC": {"name": "شركة الاتصالات العراقية", "sector": "اتصالات"},
+    "TELE": {"name": "شركة آسيا سيل للاتصالات", "sector": "اتصالات"},
+    "AMDI": {"name": "شركة أمنية للاتصالات", "sector": "اتصالات"},
+    "ITLI": {"name": "شركة المعلومات للتكنولوجيا", "sector": "اتصالات"},
+    "HLIS": {"name": "شركة الهلال للصناعة", "sector": "صناعة"},
+    "AIPT": {"name": "شركة الاتحاد العراقية للبلاستيك", "sector": "صناعة"},
+    "BSTC": {"name": "شركة بصرة للصلب", "sector": "صناعة"},
+    "CALL": {"name": "شركة الكيبل العراقية", "sector": "صناعة"},
+    "CCBI": {"name": "شركة بغداد للكوكاكولا", "sector": "صناعة"},
+    "CFIQ": {"name": "شركة الإسمنت العراقية", "sector": "صناعة"},
+    "GIIC": {"name": "الشركة العامة للصناعات الغذائية", "sector": "صناعة"},
+    "HLSI": {"name": "شركة الهلال للصناعات الغذائية", "sector": "صناعة"},
+    "IACI": {"name": "شركة الصناعات العراقية الأمريكية", "sector": "صناعة"},
+    "ICFI": {"name": "شركة الإسمنت الحجاري", "sector": "صناعة"},
+    "IICM": {"name": "شركة الصناعات العراقية المختلطة", "sector": "صناعة"},
+    "IPCO": {"name": "شركة النفط العراقية للإنتاج", "sector": "صناعة"},
+    "IRFI": {"name": "شركة الرافدين للصناعة", "sector": "صناعة"},
+    "ISDC": {"name": "شركة الإسمنت الجنوبية", "sector": "صناعة"},
+    "KAIN": {"name": "شركة الكابلات العراقية", "sector": "صناعة"},
+    "MEFK": {"name": "شركة مصفى الكوت", "sector": "صناعة"},
+    "NAIN": {"name": "شركة نينوى للصناعة", "sector": "صناعة"},
+    "NCPI": {"name": "شركة الإسمنت الشمالية", "sector": "صناعة"},
+    "SAIH": {"name": "شركة صناعة الادوية العراقية", "sector": "صناعة"},
+    "SCBI": {"name": "شركة الإسمنت المركزية", "sector": "صناعة"},
+    "SDBI": {"name": "شركة صناعة البطاريات", "sector": "صناعة"},
+    "SPPI": {"name": "شركة الصحة للصناعة الدوائية", "sector": "صناعة"},
+    "UCFI": {"name": "شركة الإسمنت الموحدة", "sector": "صناعة"},
+    "AAHP": {"name": "شركة آسيا للفنادق", "sector": "فنادق"},
+    "AIHI": {"name": "شركة عشتار للفنادق", "sector": "فنادق"},
+    "BAHI": {"name": "شركة بابل للفنادق", "sector": "فنادق"},
+    "BGHI": {"name": "شركة بغداد للفنادق", "sector": "فنادق"},
+    "ESHT": {"name": "شركة عشتار ريجنسي", "sector": "فنادق"},
+    "IAHI": {"name": "شركة العراق للفنادق والسياحة", "sector": "فنادق"},
+    "IRSH": {"name": "شركة الرشيد للفنادق", "sector": "فنادق"},
+    "MHSI": {"name": "شركة المنصور ميليا للفنادق", "sector": "فنادق"},
+    "NAHI": {"name": "شركة النجف للفنادق", "sector": "فنادق"},
+    "SAHI": {"name": "شركة السفراء للفنادق", "sector": "فنادق"},
+    "IICL": {"name": "شركة التأمين العراقية", "sector": "تأمين"},
+    "ALIQ": {"name": "شركة التأمين الأهلية", "sector": "تأمين"},
+    "AMII": {"name": "شركة التأمين الأمانة", "sector": "تأمين"},
+    "BAIN": {"name": "شركة بغداد للتأمين", "sector": "تأمين"},
+    "DAIN": {"name": "شركة دار السلام للتأمين", "sector": "تأمين"},
+    "IAIN": {"name": "شركة التأمين الإسلامية", "sector": "تأمين"},
+    "IIIN": {"name": "شركة التأمين الدولية", "sector": "تأمين"},
+    "MEIN": {"name": "شركة شرق أوسط للتأمين", "sector": "تأمين"},
+    "RAIN": {"name": "شركة الرشيد للتأمين", "sector": "تأمين"},
+    "SAIN": {"name": "شركة سومر للتأمين", "sector": "تأمين"},
+    "UAIN": {"name": "شركة الاتحاد للتأمين", "sector": "تأمين"},
+    "WAIN": {"name": "شركة وقاية للتأمين", "sector": "تأمين"},
+    "DAGR": {"name": "شركة دجلة للزراعة", "sector": "زراعة"},
+    "IAGR": {"name": "شركة العراقية للزراعة", "sector": "زراعة"},
+    "MAGR": {"name": "شركة الموصل للزراعة", "sector": "زراعة"},
+    "NAGR": {"name": "شركة النهرين للزراعة", "sector": "زراعة"},
+    "RAGR": {"name": "شركة الرافدين للزراعة", "sector": "زراعة"},
+    "SAGR": {"name": "شركة سومر للزراعة", "sector": "زراعة"},
 }
 
 def get_market_summary():
-    """يجلب ملخص السوق من ISX أو يرجع بيانات افتراضية"""
     r = safe_get(f"{ISX_BASE}/homePage.html")
     if r:
         try:
@@ -65,23 +161,10 @@ def get_market_summary():
                 return data
         except Exception as e:
             print(f"[Scraper] market_summary error: {e}")
-
-    # بيانات احتياطية لو الموقع محجوب
-    return {
-        "index": "—",
-        "change_pct": "—",
-        "value": "—",
-        "trades": "—",
-        "up": "—",
-        "down": "—",
-        "flat": "—",
-    }
+    return {"index":"—","change_pct":"—","value":"—","trades":"—","up":"—","down":"—","flat":"—"}
 
 def get_stock_info(symbol):
-    """يبحث عن سهم - يجرب ISX أولاً ثم Investing"""
     symbol = symbol.upper().strip()
-
-    # جرب ISX أولاً
     r = safe_get(f"{ISX_BASE}/companyProfileByInvestor.html?companyCode={symbol}")
     if r and len(r.text) > 500:
         try:
@@ -99,55 +182,22 @@ def get_stock_info(symbol):
             if len(data) > 2:
                 return data
         except Exception as e:
-            print(f"[Scraper] ISX stock error: {e}")
-
-    # جرب Investing.com
+            print(f"[Scraper] stock error: {e}")
     stock_info = IRAQI_STOCKS.get(symbol)
     if stock_info:
-        url = f"{INVESTING_BASE}/equities/{stock_info['investing_id']}"
-        r2 = safe_get(url)
-        if r2:
-            try:
-                soup = BeautifulSoup(r2.text, "html.parser")
-
-                # السعر
-                price_el = soup.find("span", {"data-test": "instrument-price-last"})
-                if not price_el:
-                    price_el = soup.select_one('[class*="last-price"]') or soup.select_one('[class*="price"]')
-
-                # التغيير
-                change_el = soup.find("span", {"data-test": "instrument-price-change-percent"})
-
-                price = price_el.get_text(strip=True) if price_el else "—"
-                change = change_el.get_text(strip=True) if change_el else "—"
-
-                return {
-                    "symbol": symbol,
-                    "name": stock_info["name"],
-                    "price": price,
-                    "change_pct": change,
-                    "high": "—",
-                    "low": "—",
-                    "volume": "—",
-                }
-            except Exception as e:
-                print(f"[Scraper] Investing stock error: {e}")
-
-        # لو Investing ما اشتغل، ارجع بيانات أساسية
         return {
             "symbol": symbol,
             "name": stock_info["name"],
+            "sector": stock_info.get("sector","—"),
             "price": "⏳ البيانات غير متاحة حالياً",
             "change_pct": "—",
             "high": "—",
             "low": "—",
             "volume": "—",
         }
-
-    return None  # سهم غير موجود بالقاموس
+    return None
 
 def get_top_stocks():
-    """يجلب أبرز الأسهم"""
     r = safe_get(f"{ISX_BASE}/homePage.html")
     if r:
         try:
@@ -158,11 +208,11 @@ def get_top_stocks():
                     cols = [td.get_text(strip=True) for td in row.find_all("td")]
                     if len(cols) >= 3 and re.match(r"^[A-Z]{2,6}$", cols[0]):
                         try:
-                            change = float(cols[-1].replace("%", "").replace(",", ""))
+                            change = float(cols[-1].replace("%","").replace(",",""))
                             if change > 0:
-                                up_stocks.append({"symbol": cols[0], "change": round(change, 2)})
+                                up_stocks.append({"symbol":cols[0],"change":round(change,2)})
                             elif change < 0:
-                                down_stocks.append({"symbol": cols[0], "change": round(change, 2)})
+                                down_stocks.append({"symbol":cols[0],"change":round(change,2)})
                         except:
                             pass
             if up_stocks or down_stocks:
@@ -172,12 +222,9 @@ def get_top_stocks():
                 }
         except Exception as e:
             print(f"[Scraper] top_stocks error: {e}")
-
-    # بيانات احتياطية
-    return {"up": [], "down": []}
+    return {"up":[],"down":[]}
 
 def get_latest_news():
-    """يجلب آخر الأخبار"""
     r = safe_get(f"{ISX_BASE}/storyList.html?activeTab=0")
     if not r:
         return []
@@ -203,11 +250,17 @@ def get_latest_news():
         return []
 
 def get_stock_price_for_alert(symbol):
-    """يجلب السعر الحالي فقط لفحص التنبيهات"""
     data = get_stock_info(symbol)
-    if data and data.get("price") and data["price"] not in ["—", "⏳ البيانات غير متاحة حالياً"]:
+    if data and data.get("price") and data["price"] not in ["—","⏳ البيانات غير متاحة حالياً"]:
         try:
-            return float(data["price"].replace(",", "").replace(" ", ""))
+            return float(data["price"].replace(",","").replace(" ",""))
         except:
             return None
     return None
+ENDOFFILE
+echo "done"
+{
+  "returncode" : 0,
+  "stdout" : "done\n",
+  "stderr" : ""
+}
