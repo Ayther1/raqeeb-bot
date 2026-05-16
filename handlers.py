@@ -1,13 +1,12 @@
 # handlers.py — معالجات البوت
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, BotCommand
 from telegram.ext import ContextTypes
 from config import ADMIN_ID, CHANNEL_ID, IMAGES
 from database import *
 from messages import *
+from scraper import get_market_summary, get_top_stocks, get_stock_info, IRAQI_STOCKS
 import asyncio
-from scraper import get_market_summary, get_top_stocks, get_stock_info
-import re
 
 # ─── تحقق من الاشتراك بالقناة ───
 async def check_channel(bot, user_id):
@@ -25,13 +24,17 @@ async def start_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ هذا البوت للاستخدام الشخصي فقط.")
         return
     await register_user(user.id, user.username, user.full_name)
+    # تعيين أمر /start مرئي دائماً
+    await ctx.bot.set_my_commands([
+        BotCommand("start", "ابدأ استخدام البوت")
+    ])
     text, kb = welcome_msg()
     await update.message.reply_photo(photo=IMAGES["welcome"], caption=text, reply_markup=kb)
 
 # ─── معالج الأزرار ───
 async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await query.answer()  # رد فوري لتجنب التأخير
     user = query.from_user
     data = query.data
 
@@ -70,29 +73,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reply_markup=kb
         )
 
-    # ── إضافة تنبيه ──
-    elif data == "add_alert":
-        text = (
-            "🔔 إضافة تنبيه جديد\n\n"
-            "أرسل رمز السهم والنسبة بهذا الشكل:\n\n"
-            "📈 تنبيه ارتفاع:\nBBOB 5\n\n"
-            "📉 تنبيه انخفاض:\nBBOB -5\n\n"
-            "مثال: BBOB 5 (يُنبهك عند ارتفاع 5%)"
-        )
-        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="my_alerts")]])
-        await query.edit_message_caption(caption=text + footer(), reply_markup=kb)
-        ctx.user_data["waiting_alert"] = True
-
-    # ── حذف تنبيه ──
-    elif data.startswith("del_alert_"):
-        alert_id = int(data.replace("del_alert_", ""))
-        await delete_alert(alert_id)
-        alerts = await get_user_alerts(user.id)
-        text, kb = alerts_msg(alerts)
-        await query.edit_message_caption(caption=text, reply_markup=kb)
-        await query.answer("✅ تم حذف التنبيه")
-
     # ── رجوع للقائمة الرئيسية ──
     elif data == "back_main":
         active = await is_user_active(user.id)
@@ -124,10 +104,42 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         ctx.user_data["waiting_search"] = True
 
+    # ── إعادة البحث ──
+    elif data == "search_again":
+        text, kb = search_stock_msg()
+        await query.edit_message_caption(caption=text, reply_markup=kb)
+        ctx.user_data["waiting_search"] = True
+
     # ── تنبيهاتي ──
     elif data == "my_alerts":
         alerts = await get_user_alerts(user.id)
-        text, kb = alerts_msg(alerts)
+        text, kb = alerts_msg(alerts, user.full_name)
+        await query.edit_message_caption(caption=text, reply_markup=kb)
+
+    # ── إضافة تنبيه ──
+    elif data == "add_alert":
+        text, kb = add_alert_step1_msg()
+        await query.edit_message_caption(caption=text, reply_markup=kb)
+        ctx.user_data["waiting_alert_symbol"] = True
+
+    # ── اختيار نوع التنبيه ──
+    elif data.startswith("alert_type_"):
+        parts = data.split("_")
+        symbol = parts[2]
+        alert_type = parts[3]  # up أو down
+        ctx.user_data["alert_symbol"] = symbol
+        ctx.user_data["alert_type"] = alert_type
+        text, kb = add_alert_step3_msg(symbol, alert_type)
+        await query.edit_message_caption(caption=text, reply_markup=kb)
+        ctx.user_data["waiting_alert_pct"] = True
+
+    # ── حذف تنبيه ──
+    elif data.startswith("del_alert_"):
+        alert_id = int(data.replace("del_alert_", ""))
+        await delete_alert(alert_id)
+        await query.answer("✅ تم حذف التنبيه")
+        alerts = await get_user_alerts(user.id)
+        text, kb = alerts_msg(alerts, user.full_name)
         await query.edit_message_caption(caption=text, reply_markup=kb)
 
     # ── اشتراكي ──
@@ -154,18 +166,9 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         action = parts[1]
         target_id = int(parts[2])
 
-        if action == "monthly":
-            ctx.user_data[f"confirm_{target_id}"] = "monthly"
+        if action in ["monthly", "yearly"]:
             kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ تأكيد", callback_data=f"confirm_monthly_{target_id}"),
-                InlineKeyboardButton("🔙 تراجع", callback_data=f"cancel_{target_id}"),
-            ]])
-            await query.edit_message_reply_markup(reply_markup=kb)
-
-        elif action == "yearly":
-            ctx.user_data[f"confirm_{target_id}"] = "yearly"
-            kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ تأكيد", callback_data=f"confirm_yearly_{target_id}"),
+                InlineKeyboardButton("✅ تأكيد", callback_data=f"confirm_{action}_{target_id}"),
                 InlineKeyboardButton("🔙 تراجع", callback_data=f"cancel_{target_id}"),
             ]])
             await query.edit_message_reply_markup(reply_markup=kb)
@@ -184,14 +187,11 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         sub_end = await activate_subscription(target_id, plan)
         end_str = sub_end.strftime("%d/%m/%Y")
         plan_ar = "شهري" if plan == "monthly" else "سنوي"
-        # زر إرسال الإشعار
         kb = InlineKeyboardMarkup([[
             InlineKeyboardButton("📨 إرسال إشعار للمستخدم", callback_data=f"notify_{target_id}_{plan}_{end_str}")
         ]])
         await query.edit_message_text(
-            f"✅ تم التفعيل بنجاح\n\n"
-            f"👤 ID: {target_id}\n"
-            f"📅 {plan_ar} | حتى {end_str}",
+            f"✅ تم التفعيل بنجاح\n\n👤 ID: {target_id}\n📅 {plan_ar} | حتى {end_str}",
             reply_markup=kb
         )
 
@@ -200,7 +200,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         kb = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("✅ تفعيل شهري", callback_data=f"admin_monthly_{target_id}"),
-                InlineKeyboardButton("✅ تفعيل سنوي",  callback_data=f"admin_yearly_{target_id}"),
+                InlineKeyboardButton("✅ تفعيل سنوي", callback_data=f"admin_yearly_{target_id}"),
             ],
             [InlineKeyboardButton("❌ رفض", callback_data=f"admin_reject_{target_id}")]
         ])
@@ -225,6 +225,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await query.edit_message_text(query.message.text + "\n\n📨 تم إرسال الإشعار ✅")
 
+
 # ─── معالج الرسائل النصية ───
 async def message_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -235,97 +236,59 @@ async def message_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     active = await is_user_active(user.id)
 
+    # ── انتظار رمز السهم للتنبيه (الخطوة 1) ──
+    if ctx.user_data.get("waiting_alert_symbol") and active:
+        ctx.user_data["waiting_alert_symbol"] = False
+        symbol = text.upper().strip()
+        if symbol not in IRAQI_STOCKS:
+            await update.message.reply_text(
+                f"❌ السهم {symbol} غير موجود\n\nتأكد من الرمز وحاول مرة أخرى"
+            )
+            return
+        ctx.user_data["alert_symbol"] = symbol
+        text_msg, kb = add_alert_step2_msg(symbol)
+        await update.message.reply_text(text_msg, reply_markup=kb)
+        return
+
+    # ── انتظار نسبة التنبيه (الخطوة 3) ──
+    if ctx.user_data.get("waiting_alert_pct") and active:
+        ctx.user_data["waiting_alert_pct"] = False
+        symbol = ctx.user_data.get("alert_symbol")
+        alert_type = ctx.user_data.get("alert_type")
+        try:
+            value = abs(float(text.strip().replace("%", "")))
+            await add_alert(user.id, symbol, alert_type, value)
+            direction = "📈 ارتفاع" if alert_type == "up" else "📉 انخفاض"
+            kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔔 تنبيهاتي", callback_data="my_alerts"),
+                InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="back_main"),
+            ]])
+            await update.message.reply_text(
+                f"✅ تم إضافة التنبيه بنجاح!\n\n"
+                f"🏢 السهم: {symbol}\n"
+                f"{direction} بنسبة {value}%\n\n"
+                f"سيصلك إشعار فور تحقق الشرط 🔔",
+                reply_markup=kb
+            )
+        except:
+            await update.message.reply_text("❌ أدخل رقماً صحيحاً\nمثال: 5")
+        return
+
     # ── البحث عن سهم ──
     if ctx.user_data.get("waiting_search") and active:
         ctx.user_data["waiting_search"] = False
         symbol = text.upper().strip()
-        # أرسل رسالة "جاري البحث" أولاً
-        searching = await update.message.reply_text("🔍 جاري البحث عن " + symbol + "...")
+        searching = await update.message.reply_text(
+            f"🔍 جاري البحث عن {symbol}...\n⏳ قد يستغرق بضع ثوانٍ"
+        )
         stock = get_stock_info(symbol)
         await searching.delete()
         if stock:
             msg, kb = stock_result_msg(stock)
+            await update.message.reply_photo(photo=IMAGES["search"], caption=msg, reply_markup=kb)
         else:
             msg, kb = stock_not_found_msg(symbol)
-        await update.message.reply_photo(photo=IMAGES["search"], caption=msg, reply_markup=kb)
-        return
-
-    # ── إضافة تنبيه بالضغط ──
-    if ctx.user_data.get("waiting_alert") and active:
-        ctx.user_data["waiting_alert"] = False
-        parts = text.upper().strip().split()
-        if len(parts) >= 2:
-            symbol = parts[0]
-            try:
-                value = float(parts[1])
-                alert_type = "up" if value > 0 else "down"
-                value = abs(value)
-                await add_alert(user.id, symbol, alert_type, value)
-                direction = "📈 ارتفاع" if alert_type == "up" else "📉 انخفاض"
-                await update.message.reply_text(
-                    f"✅ تم إضافة التنبيه\n{symbol} | {direction} {value}%"
-                )
-            except:
-                await update.message.reply_text("❌ صيغة خاطئة\nمثال: BBOB 5 أو BBOB -5")
-        else:
-            await update.message.reply_text("❌ صيغة خاطئة\nمثال: BBOB 5")
-        return
-
-    # ── أمر التنبيه /تنبيه BBOB 5 ──
-    if text.startswith("/تنبيه") and active:
-        parts = text.split()
-        if len(parts) >= 3:
-            symbol = parts[1].upper()
-            try:
-                value = float(parts[2])
-                alert_type = "up"
-                if len(parts) >= 4 and parts[3] == "انخفاض":
-                    alert_type = "down"
-                await add_alert(user.id, symbol, alert_type, value)
-                await update.message.reply_text(
-                    f"✅ تم إضافة التنبيه\n{symbol} | {'📈 ارتفاع' if alert_type=='up' else '📉 انخفاض'} {value}%"
-                )
-            except:
-                await update.message.reply_text("❌ صيغة خاطئة\nمثال: /تنبيه BBOB 5")
-        return
-
-    # ── حذف تنبيه /حذف_1 ──
-    if text.startswith("/حذف_") and active:
-        try:
-            alert_id = int(text.replace("/حذف_", ""))
-            await delete_alert(alert_id)
-            await update.message.reply_text("✅ تم حذف التنبيه")
-        except:
-            await update.message.reply_text("❌ خطأ في حذف التنبيه")
-        return
-
-    # ── إيصال دفع (صورة) ──
-    if update.message.photo and active is False:
-        plan = ctx.user_data.get("pending_plan", "monthly")
-        plan_ar = "شهري" if plan == "monthly" else "سنوي"
-        photo_id = update.message.photo[-1].file_id
-        kb = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ تفعيل شهري", callback_data=f"admin_monthly_{user.id}"),
-                InlineKeyboardButton("✅ تفعيل سنوي",  callback_data=f"admin_yearly_{user.id}"),
-            ],
-            [InlineKeyboardButton("❌ رفض", callback_data=f"admin_reject_{user.id}")]
-        ])
-        await ctx.bot.send_photo(
-            ADMIN_ID,
-            photo=photo_id,
-            caption=(
-                f"📩 طلب اشتراك جديد\n\n"
-                f"👤 الاسم: {user.full_name}\n"
-                f"🆔 ID: {user.id}\n"
-                f"📅 الخطة المختارة: {plan_ar}\n"
-                f"🖼️ الإيصال أعلاه"
-            ),
-            reply_markup=kb
-        )
-        await update.message.reply_text(
-            "✅ تم استلام الإيصال\nسيتم مراجعته وتفعيل اشتراكك قريباً 🙏"
-        )
+            await update.message.reply_photo(photo=IMAGES["search"], caption=msg, reply_markup=kb)
         return
 
     # ── أوامر الأدمن ──
@@ -335,13 +298,14 @@ async def message_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             lines = [f"👥 المستخدمون ({len(users)})\n"]
             for u in users[:20]:
                 end = u.get("sub_end") or u.get("trial_end") or "—"
-                lines.append(f"• {u['full_name']} | {u['user_id']} | {end[:10]}")
+                lines.append(f"• {u['full_name']} | {u['user_id']} | {str(end)[:10]}")
             await update.message.reply_text("\n".join(lines))
             return
 
     # ── لو مو مفعل ──
     if not active:
         await update.message.reply_text(expiry_msg())
+
 
 # ─── معالج الصور (إيصال الدفع) ───
 async def photo_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -354,7 +318,7 @@ async def photo_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     kb = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ تفعيل شهري", callback_data=f"admin_monthly_{user.id}"),
-            InlineKeyboardButton("✅ تفعيل سنوي",  callback_data=f"admin_yearly_{user.id}"),
+            InlineKeyboardButton("✅ تفعيل سنوي", callback_data=f"admin_yearly_{user.id}"),
         ],
         [InlineKeyboardButton("❌ رفض", callback_data=f"admin_reject_{user.id}")]
     ])
