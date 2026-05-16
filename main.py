@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+from flask import Flask
+from threading import Thread
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -11,6 +13,18 @@ from config import BOT_TOKEN
 from database import init_db
 from handlers import start_handler, callback_handler, message_handler, photo_handler
 from scheduler import setup_scheduler
+
+# ── Flask للـ UptimeRobot ──
+flask_app = Flask('')
+
+@flask_app.route('/')
+def home():
+    return "Raqeeb Bot is running!"
+
+def run_flask():
+    flask_app.run(host='0.0.0.0', port=8080)
+
+Thread(target=run_flask, daemon=True).start()
 
 # إعداد السجل
 logging.basicConfig(
@@ -26,16 +40,14 @@ logger = logging.getLogger(__name__)
 
 async def post_init(application):
     """يعمل بعد بدء البوت — يشغل الجدول الزمني"""
+    await init_db()
+    logger.info("✅ قاعدة البيانات جاهزة")
+
     scheduler = setup_scheduler(application.bot)
     scheduler.start()
     logger.info("✅ الجدول الزمني شغّال")
 
-async def main():
-    # تهيئة قاعدة البيانات
-    await init_db()
-    logger.info("✅ قاعدة البيانات جاهزة")
-
-    # بناء التطبيق
+def main():
     app = (
         Application.builder()
         .token(BOT_TOKEN)
@@ -44,24 +56,21 @@ async def main():
     )
 
     # ── تسجيل الهاندلرز ──
-    app.add_handler(CommandHandler("start",      start_handler))
-    app.add_handler(CommandHandler("اشتراك",     lambda u, c: c.bot.send_message(
-        u.effective_chat.id, "اضغط على زر 💳 اشتراكي من القائمة الرئيسية"
-    )))
+    app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-    logger.info("🚀 البوت يعمل الآن...")
     print("=" * 40)
     print("🤖 رقيب | RaqeebIQBot")
     print("✅ البوت شغّال")
     print("=" * 40)
+    logger.info("🚀 البوت يعمل الآن...")
 
-    await app.run_polling(
+    app.run_polling(
         allowed_updates=Update.ALL_TYPES,
         drop_pending_updates=True
     )
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
