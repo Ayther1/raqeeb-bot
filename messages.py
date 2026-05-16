@@ -46,7 +46,7 @@ def join_channel_msg():
 
 # ─── القائمة الرئيسية ───
 def main_menu_msg(data):
-    if data:
+    if data and data.get("index") != "—":
         change = data.get("change_pct", "0%")
         arrow = "▲" if "-" not in str(change) else "▼"
         text = (
@@ -67,18 +67,20 @@ def main_menu_msg(data):
         )
     else:
         text = (
-            f"📈 التقرير اليومي لسوق الأسهم العراقية\n"
+            f"📈 سوق الأسهم العراقية\n"
             f"📅 {today_str()}\n\n"
-            "⏳ جاري تحميل البيانات..." + footer()
+            "⏳ البيانات غير متاحة الآن\n"
+            "السوق مغلق أو يتم تحديث البيانات"
+            + footer()
         )
     kb = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🔴 أبرز أسهم اليوم", callback_data="top_stocks"),
-            InlineKeyboardButton("🔍 بحث عن سهم",      callback_data="search_stock"),
+            InlineKeyboardButton("🔍 بحث عن سهم", callback_data="search_stock"),
         ],
         [
             InlineKeyboardButton("🔔 تنبيهاتي", callback_data="my_alerts"),
-            InlineKeyboardButton("💳 اشتراكي",  callback_data="my_sub"),
+            InlineKeyboardButton("💳 اشتراكي", callback_data="my_sub"),
         ],
     ])
     return text, kb
@@ -103,9 +105,12 @@ def top_stocks_msg(stocks):
 def search_stock_msg():
     text = (
         "🔍 البحث عن سهم\n\n"
-        "أرسل رمز السهم للحصول على تفاصيله\n"
+        "أرسل رمز السهم للحصول على تفاصيله\n\n"
         "مثال: BBOB أو TELE أو BCOI\n\n"
-        "💡 يمكنك البحث بالرمز أو اسم الشركة"
+        "💡 رموز الأسهم المتاحة:\n"
+        "BBOB • TASC • BCOI • BUND • BNOI\n"
+        "IBSD • HLIS • TELE • AAHP • IICL\n"
+        "وغيرها الكثير..."
         + footer()
     )
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="back_main")]])
@@ -113,51 +118,112 @@ def search_stock_msg():
 
 # ─── نتيجة البحث ───
 def stock_result_msg(data):
-    arrow = "▲" if data.get("change","").startswith("-") is False else "▼"
+    change = str(data.get("change_pct", "—"))
+    arrow = "▲" if change and "-" not in change and change != "—" else "▼"
     text = (
-        f"🏢 {data.get('name', data['symbol'])} | {data['symbol']}\n\n"
+        f"🏢 {data.get('name', data['symbol'])}\n"
+        f"رمز السهم: {data['symbol']}\n\n"
         f"💰 السعر الحالي: {data.get('price','—')} دينار\n"
-        f"📈 التغيير: {arrow} {data.get('change_pct','—')}\n"
+        f"📈 التغيير: {arrow} {change}\n"
         f"📊 أعلى سعر اليوم: {data.get('high','—')}\n"
         f"📊 أدنى سعر اليوم: {data.get('low','—')}\n"
-        f"🔄 حجم التداول: {data.get('volume','—')}"
+        f"🔄 حجم التداول: {data.get('volume','—')}\n\n"
+        f"📅 {today_str()}"
         + footer()
     )
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="back_main")]])
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 إعادة البحث", callback_data="search_again")],
+        [InlineKeyboardButton("🔙 رجوع", callback_data="back_main")],
+    ])
     return text, kb
 
 # ─── سهم غير موجود ───
-def searching_msg():
-    text = "🔍 جاري البحث..." + footer()
-    return text
-
 def stock_not_found_msg(symbol):
     text = (
         f"❌ لم يتم العثور على السهم: {symbol}\n\n"
-        "تأكد من الرمز وحاول مرة أخرى\n"
-        "مثال: BBOB أو TELE"
+        "تأكد من الرمز وحاول مرة أخرى\n\n"
+        "مثال: BBOB أو TELE أو BCOI"
         + footer()
     )
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="back_main")]])
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 إعادة البحث", callback_data="search_again")],
+        [InlineKeyboardButton("🔙 رجوع", callback_data="back_main")],
+    ])
     return text, kb
 
 # ─── التنبيهات ───
-def alerts_msg(alerts):
+def alerts_msg(alerts, user_name=""):
     if not alerts:
-        body = "ليس لديك تنبيهات حالياً\n\nأضف تنبيهاً بكتابة:\n/تنبيه BBOB 5"
+        body = "ليس لديك تنبيهات حالياً"
+        btns = [
+            [InlineKeyboardButton("➕ إضافة تنبيه", callback_data="add_alert")],
+            [InlineKeyboardButton("🔙 رجوع", callback_data="back_main")],
+        ]
     else:
         lines = []
+        btns_del = []
         for a in alerts:
-            t = "📈 ارتفاع" if a["alert_type"] == "up" else "📉 انخفاض" if a["alert_type"] == "down" else "💰 سعر"
-            lines.append(f"• {a['symbol']} | {t} {a['value']}{'%' if a['alert_type'] != 'price' else ' دينار'} — /حذف_{a['id']}")
+            direction = "📈 ارتفاع" if a["alert_type"] == "up" else "📉 انخفاض"
+            lines.append(f"• {a['symbol']} | {direction} {a['value']}%")
+            btns_del.append([
+                InlineKeyboardButton(f"🗑 حذف تنبيه {a['symbol']}", callback_data=f"del_alert_{a['id']}")
+            ])
         body = "\n".join(lines)
-    text = f"🔔 تنبيهاتي\n\n{body}" + footer()
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="back_main")]])
+        btns = btns_del + [
+            [InlineKeyboardButton("➕ إضافة تنبيه", callback_data="add_alert")],
+            [InlineKeyboardButton("🔙 رجوع", callback_data="back_main")],
+        ]
+
+    name_txt = f" ({user_name})" if user_name else ""
+    text = f"🔔 تنبيهاتي{name_txt}\n\n{body}" + footer()
+    kb = InlineKeyboardMarkup(btns)
+    return text, kb
+
+# ─── إضافة تنبيه - الخطوة 1 ───
+def add_alert_step1_msg():
+    text = (
+        "🔔 إضافة تنبيه جديد\n\n"
+        "الخطوة 1 من 3\n\n"
+        "أرسل رمز السهم الذي تريد تتبعه\n\n"
+        "مثال: BBOB"
+        + footer()
+    )
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="my_alerts")]])
+    return text, kb
+
+# ─── إضافة تنبيه - الخطوة 2 ───
+def add_alert_step2_msg(symbol):
+    text = (
+        f"🔔 إضافة تنبيه - {symbol}\n\n"
+        "الخطوة 2 من 3\n\n"
+        "اختر نوع التنبيه:"
+        + footer()
+    )
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📈 عند الصعود", callback_data=f"alert_type_{symbol}_up"),
+            InlineKeyboardButton("📉 عند النزول", callback_data=f"alert_type_{symbol}_down"),
+        ],
+        [InlineKeyboardButton("🔙 رجوع", callback_data="my_alerts")],
+    ])
+    return text, kb
+
+# ─── إضافة تنبيه - الخطوة 3 ───
+def add_alert_step3_msg(symbol, alert_type):
+    direction = "📈 الصعود" if alert_type == "up" else "📉 النزول"
+    text = (
+        f"🔔 إضافة تنبيه - {symbol}\n\n"
+        "الخطوة 3 من 3\n\n"
+        f"اخترت: {direction}\n\n"
+        "أرسل النسبة المئوية للتنبيه\n\n"
+        "مثال: 5 (يعني عند تغيير 5%)"
+        + footer()
+    )
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="my_alerts")]])
     return text, kb
 
 # ─── الاشتراك ───
 def subscription_msg(user):
-    from datetime import datetime
     now = datetime.now()
     sub_end = user.get("sub_end")
     trial_end = user.get("trial_end")
@@ -180,8 +246,8 @@ def subscription_msg(user):
     )
     kb = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📅 اشتراك شهري",  callback_data="sub_monthly"),
-            InlineKeyboardButton("📆 اشتراك سنوي",  callback_data="sub_yearly"),
+            InlineKeyboardButton("📅 اشتراك شهري", callback_data="sub_monthly"),
+            InlineKeyboardButton("📆 اشتراك سنوي", callback_data="sub_yearly"),
         ],
         [InlineKeyboardButton("🔙 رجوع", callback_data="back_main")]
     ])
@@ -190,83 +256,18 @@ def subscription_msg(user):
 # ─── تعليمات الدفع ───
 def payment_msg(plan):
     plan_name = "شهري" if plan == "monthly" else "سنوي"
-    amount    = PRICES[plan]
+    amount = PRICES[plan]
     text = (
         f"💳 تعليمات الدفع\n\n"
         f"الخطة: {plan_name} — {amount:,} دينار\n\n"
         f"حول المبلغ عبر:\n\n"
         f"🏦 كي كارد\n"
         f"رقم الحساب: {KICHE_NUMBER}\n\n"
-        f"أو عبر QR الموجود في الصورة أعلاه\n\n"
         f"📸 بعد التحويل أرسل صورة الإيصال هنا"
         + footer()
     )
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="my_sub")]])
     return text, kb
-
-# ─── خبر عاجل ───
-def news_msg(title, body=""):
-    text = (
-        f"🔴 خبر عاجل | سوق العراق للأوراق المالية\n\n"
-        f"{title}\n"
-        f"{body}\n\n"
-        f"📅 {today_str()}"
-        + footer()
-    )
-    return text
-
-# ─── تنبيه فتح السوق ───
-def market_open_msg():
-    return (
-        f"🔔 السوق مفتوح الآن\n"
-        f"📅 {today_str()}\n\n"
-        f"تداول موفق للجميع 📊"
-        + footer()
-    )
-
-# ─── تقرير أسبوعي ───
-def weekly_report_msg(data, stocks):
-    up   = stocks.get("up",   [])[:3]
-    down = stocks.get("down", [])[:3]
-    best  = up[0]["symbol"]   + f" ▲ +{up[0]['change']}%"   if up   else "—"
-    worst = down[0]["symbol"] + f" ▼ {down[0]['change']}%"  if down else "—"
-    text = (
-        f"📊 ملخص أسبوع التداول\n"
-        f"📅 {today_str()}\n\n"
-        f"🔹 المؤشر: {data.get('index','—')} ({data.get('change_pct','—')})\n"
-        f"💰 إجمالي التداول: {data.get('value','—')}\n\n"
-        f"🏆 أفضل سهم: {best}\n"
-        f"💔 أسوأ سهم:  {worst}"
-        + footer()
-    )
-    return text
-
-# ─── تقرير شهري ───
-def monthly_report_msg(data, stocks):
-    up   = stocks.get("up",   [])[:3]
-    down = stocks.get("down", [])[:3]
-    best  = up[0]["symbol"]   + f" ▲ +{up[0]['change']}%"   if up   else "—"
-    worst = down[0]["symbol"] + f" ▼ {down[0]['change']}%"  if down else "—"
-    text = (
-        f"📅 ملخص شهر {datetime.now().strftime('%B %Y')}\n\n"
-        f"📈 أداء المؤشر: {data.get('change_pct','—')}\n"
-        f"💰 إجمالي التداول: {data.get('value','—')}\n\n"
-        f"🏆 أفضل سهم الشهر: {best}\n"
-        f"💔 أسوأ سهم الشهر:  {worst}"
-        + footer()
-    )
-    return text
-
-# ─── تنبيه انتهاء الاشتراك (قبل يوم) ───
-def expiry_warning_msg(end_date):
-    text = (
-        f"⚠️ رقيب | تنبيه\n\n"
-        f"ينتهي اشتراكك غداً! ({end_date})\n"
-        f"جدد الآن لتستمر بمتابعة السوق 📊\n\n"
-        f"للتجديد: /اشتراك"
-        + footer()
-    )
-    return text
 
 # ─── رسالة انتهاء الاشتراك ───
 def expiry_msg():
@@ -274,9 +275,8 @@ def expiry_msg():
         f"🔒 رقيب | انتهى اشتراكك\n\n"
         f"للاستمرار اختر خطتك:\n\n"
         f"📅 شهري  — {PRICES['monthly']:,} دينار عراقي\n"
-        f"📆 سنوي  — {PRICES['yearly']:,} دينار عراقي\n"
-        f"(توفر {PRICES['monthly']*12 - PRICES['yearly']:,} دينار)\n\n"
-        f"للاشتراك أرسل /اشتراك"
+        f"📆 سنوي  — {PRICES['yearly']:,} دينار عراقي\n\n"
+        f"اضغط /start للاشتراك"
         + footer()
     )
     return text
@@ -295,6 +295,54 @@ def stock_alert_msg(symbol, alert_type, value, current_price):
         f"{icon} {desc}\n"
         f"💰 السعر الحالي: {current_price} دينار\n\n"
         f"📅 {today_str()}"
+        + footer()
+    )
+    return text
+
+# ─── تنبيه فتح السوق ───
+def market_open_msg():
+    return (
+        f"🔔 السوق مفتوح الآن\n"
+        f"📅 {today_str()}\n\n"
+        f"تداول موفق للجميع 📊"
+        + footer()
+    )
+
+# ─── خبر عاجل ───
+def news_msg(title, body=""):
+    text = (
+        f"🔴 خبر عاجل | سوق العراق للأوراق المالية\n\n"
+        f"{title}\n"
+        f"{body}\n\n"
+        f"📅 {today_str()}"
+        + footer()
+    )
+    return text
+
+# ─── تقرير أسبوعي ───
+def weekly_report_msg(data, stocks):
+    up   = stocks.get("up",   [])[:3]
+    down = stocks.get("down", [])[:3]
+    best  = up[0]["symbol"]   + f" ▲ +{up[0]['change']}%"  if up   else "—"
+    worst = down[0]["symbol"] + f" ▼ {down[0]['change']}%" if down else "—"
+    text = (
+        f"📊 ملخص أسبوع التداول\n"
+        f"📅 {today_str()}\n\n"
+        f"🔹 المؤشر: {data.get('index','—')} ({data.get('change_pct','—')})\n"
+        f"💰 إجمالي التداول: {data.get('value','—')}\n\n"
+        f"🏆 أفضل سهم: {best}\n"
+        f"💔 أسوأ سهم:  {worst}"
+        + footer()
+    )
+    return text
+
+# ─── تحذير انتهاء الاشتراك ───
+def expiry_warning_msg(end_date):
+    text = (
+        f"⚠️ رقيب | تنبيه\n\n"
+        f"ينتهي اشتراكك غداً! ({end_date})\n"
+        f"جدد الآن لتستمر بمتابعة السوق 📊\n\n"
+        f"للتجديد اضغط /start"
         + footer()
     )
     return text
