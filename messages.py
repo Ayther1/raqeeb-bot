@@ -34,9 +34,10 @@ def welcome_msg():
 # ─── طلب الاشتراك بالقناة ───
 def join_channel_msg():
     text = "⚠️ للمتابعة اشترك بقناتنا أولاً" + footer()
-    kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("📢 اشترك بـ RaqeebIQ", url=f"https://t.me/{CHANNEL_ID.replace('@','')}")
-    ]])
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📢 اشترك بـ RaqeebIQ", url=f"https://t.me/{CHANNEL_ID.replace('@','')}")],
+        [InlineKeyboardButton("✅ اشتركت، تحقق الآن", callback_data="start_use")]
+    ])
     return text, kb
 
 # ─── القائمة الرئيسية ───
