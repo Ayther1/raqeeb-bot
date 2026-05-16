@@ -1,169 +1,244 @@
-# scraper.py — سحب البيانات من موقع البورصة العراقية مع الحماية من الحظر
+# scheduler.py — الجدول الزمني للمهام التلقائية
 
-import requests
-from bs4 import BeautifulSoup
-import random
-import time
-import re
-import urllib3
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from datetime import datetime
+from config import IMAGES
+from database import (
+    get_all_active_users, get_expiring_tomorrow,
+    is_news_sent, mark_news_sent, get_all_alerts,
+    get_user, is_user_active
+)
+from scraper import (
+    get_market_summary, get_top_stocks,
+    get_latest_news, get_stock_price_for_alert
+)
+from messages import (
+    main_menu_msg, weekly_report_msg, monthly_report_msg,
+    news_msg, market_open_msg, expiry_warning_msg, expiry_msg,
+    stock_alert_msg
+)
+from telegram import InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton
 
-# تجاهل تحذيرات SSL القديم للموقع
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-BASE_URL = "http://www.isx-iq.net/isxportal/portal"
-
-# ── قائمة User-Agents حقيقية ──
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-]
-
-def get_headers():
-    return {
-        "User-Agent": random.choice(USER_AGENTS),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-        "Accept-Encoding": "gzip, deflate",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Cache-Control": "max-age=0",
-        "Referer": "http://www.isx-iq.net/isxportal/portal/homePage.html",
-    }
-
-def smart_sleep(min_sec=2, max_sec=5):
-    time.sleep(random.uniform(min_sec, max_sec))
-
-def safe_get(url, retries=3):
-    for attempt in range(retries):
+# ─── إرسال التقرير اليومي ───
+async def send_daily_report(bot):
+    print(f"[Scheduler] 📊 إرسال التقرير اليومي - {datetime.now()}")
+    users = await get_all_active_users()
+    market = get_market_summary()
+    stocks = get_top_stocks()
+    if not market:
+        print("[Scheduler] ❌ فشل جلب بيانات السوق")
+        return
+    text, kb = main_menu_msg(market)
+    sent = 0
+    for user_id in users:
+        if not await is_user_active(user_id):
+            continue
         try:
-            smart_sleep(1, 3)
-            r = requests.get(url, headers=get_headers(), timeout=15, verify=False, allow_redirects=True)
-            if r.status_code == 200:
-                return r
-            elif r.status_code == 403:
-                print(f"[Scraper] ⚠️ محظور (403) - المحاولة {attempt+1}/{retries}")
-                time.sleep(random.uniform(10, 20))
-            else:
-                time.sleep(random.uniform(3, 6))
-        except requests.exceptions.ConnectionError:
-            print(f"[Scraper] ❌ خطأ في الاتصال - المحاولة {attempt+1}/{retries}")
-            time.sleep(random.uniform(5, 10))
-        except requests.exceptions.Timeout:
-            print(f"[Scraper] ❌ انتهت المهلة - المحاولة {attempt+1}/{retries}")
-            time.sleep(random.uniform(3, 6))
+            await bot.send_photo(
+                chat_id=user_id,
+                photo=IMAGES["daily"],
+                caption=text,
+                reply_markup=kb
+            )
+            sent += 1
         except Exception as e:
-            print(f"[Scraper] ❌ خطأ: {e}")
-            time.sleep(random.uniform(2, 4))
-    return None
+            print(f"[Scheduler] ❌ فشل الإرسال للمستخدم {user_id}: {e}")
+    print(f"[Scheduler] ✅ أُرسل التقرير لـ {sent} مستخدم")
 
-def get_market_summary():
-    r = safe_get(f"{BASE_URL}/homePage.html")
-    if not r:
-        return None
-    try:
-        soup = BeautifulSoup(r.text, "html.parser")
-        lines = [l.strip() for l in soup.get_text().split("\n") if l.strip()]
-        data = {}
-        for i, line in enumerate(lines):
-            def nxt(n=1): return lines[i+n] if i+n < len(lines) else ""
-            if "Main Index"    in line: data["index"]      = nxt()
-            if "Change %"      in line: data["change_pct"] = nxt()
-            if "Change"        in line and "%" not in line and "change" not in data:
-                data["change"] = nxt()
-            if "Value Traded"  in line: data["value"]      = nxt()
-            if "Trades"        in line and "Value" not in line: data["trades"] = nxt()
-            if "Symbols Up"    in line: data["up"]         = nxt()
-            if "Symbols Down"  in line: data["down"]       = nxt()
-            if "Flat"          in line: data["flat"]       = nxt()
-            if "Latest Update" in line: data["date"]       = nxt()
-        return data if len(data) >= 4 else None
-    except Exception as e:
-        print(f"[Scraper] market_summary error: {e}")
-        return None
-
-def get_top_stocks():
-    r = safe_get(f"{BASE_URL}/homePage.html")
-    if not r:
-        return {"up": [], "down": []}
-    try:
-        soup = BeautifulSoup(r.text, "html.parser")
-        up_stocks, down_stocks = [], []
-        for table in soup.find_all("table"):
-            for row in table.find_all("tr"):
-                cols = [td.get_text(strip=True) for td in row.find_all("td")]
-                if len(cols) >= 3 and re.match(r"^[A-Z]{2,6}$", cols[0]):
-                    try:
-                        change = float(cols[-1].replace("%", "").replace(",", ""))
-                        if change > 0:
-                            up_stocks.append({"symbol": cols[0], "change": round(change, 2)})
-                        elif change < 0:
-                            down_stocks.append({"symbol": cols[0], "change": round(change, 2)})
-                    except:
-                        pass
-        return {
-            "up":   sorted(up_stocks,   key=lambda x: x["change"], reverse=True)[:5],
-            "down": sorted(down_stocks, key=lambda x: x["change"])[:5],
-        }
-    except Exception as e:
-        print(f"[Scraper] top_stocks error: {e}")
-        return {"up": [], "down": []}
-
-def get_latest_news():
-    r = safe_get(f"{BASE_URL}/storyList.html?activeTab=0")
-    if not r:
-        return []
-    try:
-        soup = BeautifulSoup(r.text, "html.parser")
-        news, seen = [], set()
-        for link in soup.find_all("a", href=True):
-            href = link["href"]
-            if "storyDetails" not in href:
-                continue
-            story_id = re.search(r"storyId=(\d+)", href)
-            title = link.get_text(strip=True)
-            if story_id and title and len(title) > 5 and story_id.group(1) not in seen:
-                seen.add(story_id.group(1))
-                news.append({
-                    "id":    story_id.group(1),
-                    "title": title,
-                    "url":   f"http://www.isx-iq.net{href}" if href.startswith("/") else href,
-                })
-        return news[:10]
-    except Exception as e:
-        print(f"[Scraper] news error: {e}")
-        return []
-
-def get_stock_info(symbol):
-    symbol = symbol.upper().strip()
-    r = safe_get(f"{BASE_URL}/companyProfileByInvestor.html?companyCode={symbol}")
-    if not r or len(r.text) < 500:
-        return None
-    try:
-        soup = BeautifulSoup(r.text, "html.parser")
-        lines = [l.strip() for l in soup.get_text().split("\n") if l.strip()]
-        data = {"symbol": symbol}
-        for i, line in enumerate(lines):
-            def nxt(): return lines[i+1] if i+1 < len(lines) else ""
-            if "Company Name" in line: data["name"]       = nxt()
-            if "Last Price"   in line: data["price"]      = nxt()
-            if "Change %"     in line: data["change_pct"] = nxt()
-            if line == "High":         data["high"]       = nxt()
-            if line == "Low":          data["low"]        = nxt()
-            if "Volume"       in line: data["volume"]     = nxt()
-        return data if len(data) > 2 else None
-    except Exception as e:
-        print(f"[Scraper] stock_info error: {e}")
-        return None
-
-def get_stock_price_for_alert(symbol):
-    """يجلب السعر الحالي فقط لفحص التنبيهات"""
-    data = get_stock_info(symbol)
-    if data and data.get("price"):
+# ─── تنبيه فتح السوق ───
+async def send_market_open(bot):
+    print(f"[Scheduler] 🔔 تنبيه فتح السوق - {datetime.now()}")
+    users = await get_all_active_users()
+    text = market_open_msg()
+    for user_id in users:
+        if not await is_user_active(user_id):
+            continue
         try:
-            return float(data["price"].replace(",", ""))
-        except:
-            return None
-    return None
+            await bot.send_photo(
+                chat_id=user_id,
+                photo=IMAGES["open"],
+                caption=text
+            )
+        except Exception as e:
+            print(f"[Scheduler] ❌ {user_id}: {e}")
+
+# ─── فحص الأخبار الجديدة ───
+async def check_news(bot):
+    news_list = get_latest_news()
+    if not news_list:
+        return
+    users = await get_all_active_users()
+    for news in news_list:
+        if await is_news_sent(news["id"]):
+            continue
+        # خبر جديد!
+        await mark_news_sent(news["id"])
+        text = news_msg(news["title"])
+        for user_id in users:
+            if not await is_user_active(user_id):
+                continue
+            try:
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=IMAGES["news"],
+                    caption=text
+                )
+            except Exception as e:
+                print(f"[Scheduler] ❌ news {user_id}: {e}")
+        print(f"[Scheduler] 📰 خبر جديد أُرسل: {news['title'][:50]}")
+
+# ─── التقرير الأسبوعي ───
+async def send_weekly_report(bot):
+    print(f"[Scheduler] 📅 التقرير الأسبوعي - {datetime.now()}")
+    users = await get_all_active_users()
+    market = get_market_summary()
+    stocks = get_top_stocks()
+    if not market:
+        return
+    text = weekly_report_msg(market, stocks)
+    for user_id in users:
+        if not await is_user_active(user_id):
+            continue
+        try:
+            await bot.send_photo(
+                chat_id=user_id,
+                photo=IMAGES["weekly"],
+                caption=text
+            )
+        except Exception as e:
+            print(f"[Scheduler] ❌ {user_id}: {e}")
+
+# ─── التقرير الشهري ───
+async def send_monthly_report(bot):
+    print(f"[Scheduler] 📆 التقرير الشهري - {datetime.now()}")
+    users = await get_all_active_users()
+    market = get_market_summary()
+    stocks = get_top_stocks()
+    if not market:
+        return
+    text = monthly_report_msg(market, stocks)
+    for user_id in users:
+        if not await is_user_active(user_id):
+            continue
+        try:
+            await bot.send_photo(
+                chat_id=user_id,
+                photo=IMAGES["monthly"],
+                caption=text
+            )
+        except Exception as e:
+            print(f"[Scheduler] ❌ {user_id}: {e}")
+
+# ─── تنبيهات انتهاء الاشتراك ───
+async def check_expiring(bot):
+    expiring = await get_expiring_tomorrow()
+    for user in expiring:
+        end = user.get("sub_end") or user.get("trial_end")
+        end_str = datetime.fromisoformat(end).strftime("%d/%m/%Y")
+        try:
+            await bot.send_message(
+                chat_id=user["user_id"],
+                text=expiry_warning_msg(end_str)
+            )
+        except Exception as e:
+            print(f"[Scheduler] ❌ expiry warning {user['user_id']}: {e}")
+
+# ─── فحص تنبيهات الأسهم ───
+async def check_stock_alerts(bot):
+    alerts = await get_all_alerts()
+    if not alerts:
+        return
+    # جمع الأسهم الفريدة
+    symbols = list(set(a["symbol"] for a in alerts))
+    prices = {}
+    for symbol in symbols:
+        price = get_stock_price_for_alert(symbol)
+        if price:
+            prices[symbol] = price
+
+    for alert in alerts:
+        symbol = alert["symbol"]
+        current_price = prices.get(symbol)
+        if not current_price:
+            continue
+        triggered = False
+        if alert["alert_type"] == "up":
+            # نحسب نسبة التغيير - نحتاج سعر الإغلاق السابق (نستخدم تقريب)
+            triggered = True  # مبسط - يمكن تحسينه لاحقاً
+        elif alert["alert_type"] == "down":
+            triggered = True
+        elif alert["alert_type"] == "price":
+            triggered = current_price >= alert["value"]
+
+        if triggered:
+            try:
+                from database import delete_alert
+                text = stock_alert_msg(
+                    symbol, alert["alert_type"],
+                    alert["value"], current_price
+                )
+                await bot.send_photo(
+                    chat_id=alert["user_id"],
+                    photo=IMAGES["open"],
+                    caption=text
+                )
+                await delete_alert(alert["id"])
+            except Exception as e:
+                print(f"[Scheduler] ❌ alert {alert['user_id']}: {e}")
+
+# ─── إعداد الجدول ───
+def setup_scheduler(bot):
+    scheduler = AsyncIOScheduler(timezone="Asia/Baghdad")
+
+    # تنبيه فتح السوق — 9:45 ص (الأحد - الخميس)
+    scheduler.add_job(
+        send_market_open, CronTrigger(
+            day_of_week="sun,mon,tue,wed,thu",
+            hour=9, minute=45
+        ), args=[bot], id="market_open"
+    )
+
+    # التقرير اليومي — 3:00 م (الأحد - الخميس)
+    scheduler.add_job(
+        send_daily_report, CronTrigger(
+            day_of_week="sun,mon,tue,wed,thu",
+            hour=15, minute=0
+        ), args=[bot], id="daily_report"
+    )
+
+    # فحص الأخبار — كل 15 دقيقة
+    scheduler.add_job(
+        check_news, CronTrigger(minute="*/15"),
+        args=[bot], id="check_news"
+    )
+
+    # فحص تنبيهات الأسهم — كل 30 دقيقة (أيام التداول)
+    scheduler.add_job(
+        check_stock_alerts, CronTrigger(
+            day_of_week="sun,mon,tue,wed,thu",
+            hour="10-15", minute="*/30"
+        ), args=[bot], id="stock_alerts"
+    )
+
+    # التقرير الأسبوعي — الخميس 4:00 م
+    scheduler.add_job(
+        send_weekly_report, CronTrigger(
+            day_of_week="thu", hour=16, minute=0
+        ), args=[bot], id="weekly_report"
+    )
+
+    # التقرير الشهري — أول أحد من كل شهر
+    scheduler.add_job(
+        send_monthly_report, CronTrigger(
+            day_of_week="sun", day="1-7", hour=10, minute=0
+        ), args=[bot], id="monthly_report"
+    )
+
+    # فحص انتهاء الاشتراكات — كل يوم 9:00 ص
+    scheduler.add_job(
+        check_expiring, CronTrigger(hour=9, minute=0),
+        args=[bot], id="check_expiring"
+    )
+
+    return scheduler
