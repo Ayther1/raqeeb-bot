@@ -10,7 +10,8 @@ import urllib3
 # تجاهل تحذيرات SSL القديم للموقع
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-BASE_URL = "http://www.isx-iq.net/isxportal/portal"
+BASE_URL = "http://isx-iq.net/isxportal/portal"
+
 
 # ── قائمة User-Agents حقيقية ──
 USER_AGENTS = [
